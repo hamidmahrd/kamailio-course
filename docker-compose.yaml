@@ -1,45 +1,66 @@
 ---
-version: "3.9"
 services:
-
   sngrep:
     build:
       context: ./sngrep
       dockerfile: Dockerfile
     container_name: sngrep
+    labels:
+      custom_id: "5"
     privileged: true  
     network_mode: host 
     environment:
       - TERM=xterm
     cap_add:
       - NET_ADMIN
-
-  kamailio-edge:
-    image: kamailio/kamailio-ci:5.4-alpine.debug
-    container_name: kamailio-edge
-    ports:
-      - "5090:5060"
-    volumes:
-      - ./kamailio-default/:/etc/kamailio
+  db:
+    image: mysql:5.7
+    restart: always
+    container_name: db01
+    labels:
+      custom_id: "3"
     environment:
-      - KAM_SHM_MEM_SIZE=256
-      - COREIP=172.16.254.2
-      - CORESUBNET=172.16.254.1/24
-      - TLSPORT=5061
-      - UDPPORT=5060
-      - PUBLICIP=192.168.254.2
+      MYSQL_DATABASE: 'kamailio'
+      MYSQL_USER: 'user'
+      MYSQL_PASSWORD: 'ro_passord'
+      MYSQL_ROOT_PASSWORD: 'rw_password'
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uuser", "-pro_passord"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - '3306:3306'
+    expose:
+      - '3306'
+    volumes:
+      - ./db:/var/lib/mysql
     networks:
-      external:
-        ipv4_address: 192.168.254.2
       internal:
-        ipv4_address: 172.16.254.2
+        ipv4_address: 172.16.254.10
+  
+  adminer:
+    image: adminer
+    container_name: dbmanage
+    labels:
+      custom_id: "4"
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      internal:
+        ipv4_address: 172.16.254.11
 
   b2bua_internal_01:
     tty: true
-    container_name: b2bua_internal_01 
+    container_name: int_01
+    labels:
+      custom_id: "6"
     stdin_open: true
     image: andrius/pjsua:latest
-    command: pjsua --null-audio --no-tcp --outbound sip:172.16.254.2;lr --auto-answer=200
+    volumes:
+      - ./b2bua/b2bua_internal_01/:/config
+    command: pjsua --config-file=/config/pjsua.cfg
     ports:
       - "5091:5060"
     networks:
@@ -48,7 +69,9 @@ services:
 
   b2bua_internal_02:
     tty: true
-    container_name: b2bua_internal_02 
+    container_name: int_02
+    labels:
+      custom_id: "7"
     stdin_open: true
     image: andrius/pjsua:latest
     command: pjsua --null-audio --no-tcp --outbound sip:172.16.254.2;lr --auto-answer=200
@@ -60,10 +83,12 @@ services:
 
   b2bua_external_01:
     tty: true
-    container_name: b2bua_external_01
+    container_name: ext_01
     stdin_open: true
     image: andrius/pjsua:latest
-    command: pjsua --null-audio --no-tcp --outbound sip:192.168.254.2;lr --auto-answer=200
+    volumes:
+      - ./b2bua/b2bua_external_01:/config
+    command: pjsua --config-file=/config/pjsua.cfg
     ports:
       - "5093:5060"
     networks:
@@ -72,7 +97,9 @@ services:
 
   b2bua_external_02:
     tty: true
-    container_name: b2bua_external_02
+    container_name: ext_02
+    labels:
+      custom_id: "9"
     stdin_open: true
     image: andrius/pjsua:latest
     command: pjsua --null-audio --no-tcp --outbound sip:192.168.254.2;lr --auto-answer=200
@@ -82,6 +109,53 @@ services:
       external:
         ipv4_address: 192.168.254.101
 
+  kamailio-edge:
+    image: kamailio/kamailio-ci:5.4-alpine.debug
+    container_name: kamailio
+    labels:
+      custom_id: "1"
+    ports:
+      - "5090:5060"
+    volumes:
+      - ./kamailio-default/:/etc/kamailio
+    environment:
+      - KAM_SHM_MEM_SIZE=256
+      - COREIP=172.16.254.2
+      - CORESUBNET=172.16.254.1/24
+      - TLSPORT=5061
+      - UDPPORT=5060
+      - PUBLICIP=192.168.254.2
+      - DBHOST=172.16.254.10
+      - DBNAME=kamailio
+      - DBUSER=kamailio
+      - DBPASS=kamailiorw
+    depends_on:
+      db:
+        condition: service_healthy
+      rtpengine-edge:
+        condition: service_started
+    networks:
+      external:
+        ipv4_address: 192.168.254.2
+      internal:
+        ipv4_address: 172.16.254.2
+
+  rtpengine-edge:
+    build:
+      context: ./rtpengine-edge/docker
+      dockerfile: Dockerfile
+    container_name: rtpengine
+    labels:
+      custom_id: "2"
+    ports:
+      - "23000-23100:23000-23100"
+    volumes:
+      - ./rtpengine-edge/config:/etc/rtpengine
+    networks:
+      external:
+        ipv4_address: 192.168.254.3
+      internal:
+        ipv4_address: 172.16.254.3
 
 networks:
     external:
